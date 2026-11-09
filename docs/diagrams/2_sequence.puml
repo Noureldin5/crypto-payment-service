@@ -1,0 +1,70 @@
+@startuml sequence
+title Sequence Diagram - Take a payment from a client's wallet
+skinparam shadowing false
+autonumber
+
+participant "Calling service\n(Shop)" as shop
+participant "API\n(routes.py)" as api
+participant "PaymentService" as svc
+participant "WalletProvider\n(Bitcoin Core)" as wallet
+participant "ClientDataProvider\n(ABC)" as abc
+database "PaymentRepository\n(PostgreSQL)" as db
+
+shop -> api : POST /payments {client_id, amount}\nX-API-Key, Idempotency-Key
+api -> api : authenticate caller
+api -> svc : create_payment(...)
+svc -> db : get_by_idempotency_key()
+alt same request already processed
+  db --> svc : existing payment
+  svc --> api : existing payment
+else new request
+  svc -> db : save(status = CREATED)
+
+  == Step 1: does the client have a wallet? ==
+  svc -> wallet : find_wallet(client_id)
+  alt no wallet
+    wallet --> svc : None
+    svc -> db : save(FAILED, WALLET_NOT_FOUND)
+  else wallet found
+    wallet --> svc : wallet_id
+    svc -> db : save(WALLET_FOUND)
+
+    == Step 2: get client data ==
+    svc -> abc : get_client(client_id)
+    abc --> svc : ClientData {name, email, status}
+    alt not found / blocked
+      svc -> db : save(FAILED, CLIENT_NOT_FOUND / CLIENT_BLOCKED)
+    else active
+      svc -> db : save(CLIENT_VERIFIED)
+
+      == Step 3: is there enough money? ==
+      svc -> wallet : get_balance(wallet_id)
+      wallet --> svc : balance
+      alt balance < amount
+        svc -> db : save(FAILED, INSUFFICIENT_FUNDS)
+      else enough
+        svc -> db : save(FUNDS_CONFIRMED)
+
+        == Step 4: take the payment ==
+        svc -> wallet : transfer_to_merchant(wallet_id, amount)
+        wallet --> svc : tx_id
+        svc -> db : save(PROCESSING, tx_id)
+        svc -> wallet : get_transaction(tx_id)
+        wallet --> svc : confirmations
+        opt confirmations >= required
+          svc -> db : save(SUCCESS)
+        end
+      end
+    end
+  end
+end
+svc --> api : Payment
+api --> shop : 201 (SUCCESS / PROCESSING)\nor 402 (FAILED + reason)
+
+... later ...
+shop -> api : GET /payments/{id}
+api -> svc : get_payment(id)
+svc -> wallet : get_transaction(tx_id)
+svc -> db : save(SUCCESS)
+api --> shop : 200 {status: SUCCESS}
+@enduml

@@ -1,0 +1,20 @@
+@startuml context
+title Context Diagram - Crypto Payment Service
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam defaultFontSize 13
+
+actor "Client\n(wallet owner)" as client
+rectangle "Calling service\n(e.g. Online Shop)" as shop #E8F0FE
+rectangle "**Crypto Payment Service**\n(our system)\nFastAPI" as pay #C8E6C9
+rectangle "ABC Service\n(client data / KYC)" as abc #FFF3E0
+database "PostgreSQL\n(payments)" as db
+rectangle "Bitcoin Core\n(open-source crypto wallet,\nregtest network)" as btc #FCE4EC
+
+client --> shop : buys something
+shop --> pay : POST /payments\n(client_id, amount)\nX-API-Key
+pay --> shop : payment result\n(SUCCESS / FAILED + reason)
+pay --> btc : JSON-RPC: find wallet,\nbalance, send, confirmations
+pay --> abc : GET /clients/{id}
+pay --> db : save payment & status
+@enduml

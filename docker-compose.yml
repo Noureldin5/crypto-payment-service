@@ -1,0 +1,65 @@
+services:
+  # Our payment service (the only thing exposed to the internet)
+  api:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://payments:${POSTGRES_PASSWORD}@db:5432/payments
+    ports:
+      - "8090:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      bitcoind:
+        condition: service_started
+      abc-service:
+        condition: service_started
+    restart: unless-stopped
+
+  # Mock "ABC" service that owns client data (internal only)
+  abc-service:
+    build: ./abc_service
+    environment:
+      ABC_API_KEY: ${ABC_API_KEY}
+    restart: unless-stopped
+
+  # PostgreSQL: stores payments and their status history
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: payments
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: payments
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U payments"]
+      interval: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # Bitcoin Core: the open-source crypto wallet, on a private test chain (regtest)
+  bitcoind:
+    build: ./bitcoind
+    image: payment-bitcoind
+    command: >
+      bitcoind -regtest -server -printtoconsole
+      -rpcbind=0.0.0.0 -rpcallowip=0.0.0.0/0
+      -rpcuser=${BTC_RPC_USER} -rpcpassword=${BTC_RPC_PASSWORD}
+      -fallbackfee=0.0001
+    volumes:
+      - btcdata:/root/.bitcoin
+    restart: unless-stopped
+
+  # Mines a block every 10s so transactions get confirmed (like a real network)
+  miner:
+    image: payment-bitcoind
+    depends_on: [bitcoind]
+    entrypoint: ["sh", "-c"]
+    command:
+      - "while true; do bitcoin-cli -regtest -rpcconnect=bitcoind -rpcuser=${BTC_RPC_USER} -rpcpassword=${BTC_RPC_PASSWORD} -rpcwallet=miner -generate 1 >/dev/null 2>&1; sleep 10; done"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  btcdata:

@@ -1,0 +1,111 @@
+@startuml class
+title Class Diagram - Crypto Payment Service
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+hide empty members
+
+package "domain" #F1F8E9 {
+  enum PaymentStatus {
+    CREATED
+    WALLET_FOUND
+    CLIENT_VERIFIED
+    FUNDS_CONFIRMED
+    PROCESSING
+    SUCCESS
+    FAILED
+  }
+  enum FailureReason {
+    WALLET_NOT_FOUND
+    CLIENT_NOT_FOUND
+    CLIENT_BLOCKED
+    INSUFFICIENT_FUNDS
+    WALLET_ERROR
+    CLIENT_SERVICE_UNAVAILABLE
+    TRANSACTION_REJECTED
+  }
+  class Payment {
+    +id: str
+    +client_id: str
+    +amount: Decimal
+    +currency: str
+    +caller_service: str
+    +idempotency_key: str
+    +status: PaymentStatus
+    +failure_reason: FailureReason
+    +wallet_id: str
+    +tx_id: str
+    +confirmations: int
+    +transition_to(status)
+    +fail(reason)
+    +is_final(): bool
+  }
+}
+
+package "ports (interfaces)" #E3F2FD {
+  interface WalletProvider {
+    +find_wallet(client_id): str
+    +get_balance(wallet_id): Decimal
+    +transfer_to_merchant(wallet_id, amount, memo): TransferResult
+    +get_transaction(wallet_id, tx_id): TransactionInfo
+  }
+  interface ClientDataProvider {
+    +get_client(client_id): ClientData
+  }
+  interface PaymentRepository {
+    +save(payment)
+    +get(id): Payment
+    +get_by_idempotency_key(caller, key): Payment
+    +list_recent(limit): list
+  }
+  class ClientData {
+    +client_id, full_name, email, status
+    +is_active(): bool
+  }
+}
+
+package "services" #FFF8E1 {
+  class PaymentService {
+    -wallet: WalletProvider
+    -client_data: ClientDataProvider
+    -repository: PaymentRepository
+    -required_confirmations: int
+    +create_payment(...): Payment
+    +get_payment(id): Payment
+    +refresh_confirmations(payment)
+    -_process(payment)
+  }
+}
+
+package "adapters (implementations)" #FCE4EC {
+  class BitcoinCoreWallet
+  class BitcoinRpcClient {
+    +call(method, params, wallet)
+  }
+  class InMemoryWallet
+  class AbcHttpClientDataProvider
+  class SqlPaymentRepository
+}
+
+package "api" #EDE7F6 {
+  class Routes <<FastAPI router>> {
+    +POST /payments
+    +GET /payments/{id}
+    +GET /payments
+  }
+}
+
+Payment --> PaymentStatus
+Payment --> FailureReason
+PaymentService --> WalletProvider
+PaymentService --> ClientDataProvider
+PaymentService --> PaymentRepository
+PaymentService ..> Payment : creates
+ClientDataProvider ..> ClientData
+
+WalletProvider <|.. BitcoinCoreWallet
+WalletProvider <|.. InMemoryWallet
+BitcoinCoreWallet --> BitcoinRpcClient
+ClientDataProvider <|.. AbcHttpClientDataProvider
+PaymentRepository <|.. SqlPaymentRepository
+Routes --> PaymentService
+@enduml

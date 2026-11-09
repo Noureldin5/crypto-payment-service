@@ -1,0 +1,32 @@
+@startuml state
+title State Diagram - Payment request
+skinparam shadowing false
+
+[*] --> CREATED : POST /payments
+
+CREATED --> WALLET_FOUND : wallet exists
+CREATED --> FAILED : WALLET_NOT_FOUND
+
+WALLET_FOUND --> CLIENT_VERIFIED : ABC returned active client
+WALLET_FOUND --> FAILED : CLIENT_NOT_FOUND /\nCLIENT_BLOCKED /\nCLIENT_SERVICE_UNAVAILABLE
+
+CLIENT_VERIFIED --> FUNDS_CONFIRMED : balance >= amount
+CLIENT_VERIFIED --> FAILED : INSUFFICIENT_FUNDS
+
+FUNDS_CONFIRMED --> PROCESSING : transaction broadcast (tx_id)
+FUNDS_CONFIRMED --> FAILED : WALLET_ERROR
+
+PROCESSING --> SUCCESS : confirmations >= required
+PROCESSING --> FAILED : TRANSACTION_REJECTED
+
+SUCCESS --> [*]
+FAILED --> [*]
+
+note right of PROCESSING
+  Money has left the client's wallet
+  and is waiting to be confirmed in a block.
+end note
+note bottom of FAILED
+  Final state. failure_reason says why.
+end note
+@enduml
